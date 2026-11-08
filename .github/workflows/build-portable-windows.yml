@@ -87,22 +87,29 @@ jobs:
         shell: pwsh
         run: |
           $ble = (Resolve-Path build/ble-dist/UxPlayBLEBeacon/UxPlayBLEBeacon.exe).Path
+          $env:PYTHONUNBUFFERED = '1'
+          # First verify that frozen interpreter itself starts.
+          & $ble --help
+          if ($LASTEXITCODE -ne 0) { throw "Frozen beacon --help failed with code $LASTEXITCODE" }
+          # Starting with a nonexistent status file must not attempt BLE advertising,
+          # but it must import the original WinRT module and poll continuously.
           $out = Join-Path $PWD 'build/ble-test-out.txt'
           $err = Join-Path $PWD 'build/ble-test-err.txt'
-          $env:PYTHONUNBUFFERED = '1'
           $missing = Join-Path $PWD 'build/nonexistent-beacon-file.bin'
           $proc = Start-Process -FilePath $ble -ArgumentList @('--path', "$missing", '--ipv4', '192.0.2.10') -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
           try {
-            Start-Sleep -Seconds 6
+            Start-Sleep -Seconds 18
             $proc.Refresh()
             $stdout = Get-Content $out -Raw -ErrorAction SilentlyContinue
             $stderr = Get-Content $err -Raw -ErrorAction SilentlyContinue
+            Write-Host "BLE process still running: $(!$proc.HasExited)"
+            if ($proc.HasExited) { Write-Host "Exit code: $($proc.ExitCode)" }
+            Write-Host "BLE stdout: $stdout"
+            Write-Host "BLE stderr: $stderr"
             if ($proc.HasExited -or $stdout -notmatch 'loaded uxplay_beacon_module_winrt') {
-              Write-Host $stdout
-              Write-Host $stderr
-              throw 'Portable BLE helper could not import the upstream WinRT beacon implementation'
+              throw 'Portable BLE helper could not import the original WinRT beacon module'
             }
-            Write-Host 'BLE helper loaded successfully without requiring Bluetooth hardware on CI.'
+            Write-Host 'BLE helper initialized without hardware and remains active.'
           } finally {
             if (!$proc.HasExited) { Stop-Process -Id $proc.Id -Force }
           }
