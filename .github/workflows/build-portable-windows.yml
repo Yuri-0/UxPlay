@@ -1,0 +1,112 @@
+name: Build latest UxPlay Windows Portable
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/build-portable-windows.yml'
+      - 'packaging/**'
+      - 'README-PORTABLE-KO.md'
+
+permissions:
+  contents: read
+
+jobs:
+  portable-windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Checkout fork packaging files
+        uses: actions/checkout@v4
+
+      # Always build the latest ORIGINAL upstream source, even if the fork is older.
+      - name: Checkout latest original FDH2/UxPlay
+        uses: actions/checkout@v4
+        with:
+          repository: FDH2/UxPlay
+          ref: master
+          path: upstream
+          persist-credentials: false
+
+      - name: Install MSYS2 UCRT64 build and multimedia runtime
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-openssl
+            mingw-w64-ucrt-x86_64-libplist
+            mingw-w64-ucrt-x86_64-gstreamer
+            mingw-w64-ucrt-x86_64-gst-plugins-base
+            mingw-w64-ucrt-x86_64-gst-plugins-good
+            mingw-w64-ucrt-x86_64-gst-plugins-bad
+            mingw-w64-ucrt-x86_64-gst-libav
+            mingw-w64-ucrt-x86_64-glib-networking
+
+      - name: Build unchanged upstream UxPlay with built-in mDNS
+        run: |
+          set -eux
+          cmake -S upstream -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_DNS_SD=OFF
+          cmake --build build --parallel 2
+          test -f build/uxplay.exe
+
+      - name: Build self-contained launcher (no BAT or manual commands)
+        run: |
+          set -eux
+          gcc -O2 -Wall -Wextra -municode -o build/portable-launcher.exe packaging/launcher.c
+          test -f build/portable-launcher.exe
+
+      - name: Setup Python for portable packaging
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PE DLL dependency inspector
+        shell: pwsh
+        run: python -m pip install pefile==2024.8.26
+
+      - name: Package original binary, GStreamer and dependency DLLs
+        shell: pwsh
+        run: |
+          $prefix = Join-Path "${{ steps.msys2.outputs.msys2-location }}" "ucrt64"
+          python packaging/package_portable.py --original build/uxplay.exe --launcher build/portable-launcher.exe --source upstream --prefix "$prefix" --output dist/UxPlay-Portable
+
+      - name: Smoke test native EXE through launcher
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path dist/UxPlay-Portable/UxPlay.exe).Path
+          $proc = Start-Process -FilePath $exe -ArgumentList '-h' -Wait -PassThru -NoNewWindow
+          if ($proc.ExitCode -ne 0) { throw "UxPlay help test exited with code $($proc.ExitCode)" }
+
+      - name: Verify GStreamer decoding, video, audio plugins
+        shell: pwsh
+        run: |
+          $runtime = (Resolve-Path dist/UxPlay-Portable/runtime).Path
+          $env:PATH = "$runtime;$env:PATH"
+          $env:GST_PLUGIN_PATH_1_0 = "$runtime\plugins"
+          $env:GST_PLUGIN_SYSTEM_PATH_1_0 = "$runtime\plugins"
+          $env:GST_PLUGIN_SCANNER = "$runtime\gst-plugin-scanner.exe"
+          $env:GST_PLUGIN_SCANNER_1_0 = "$runtime\gst-plugin-scanner.exe"
+          foreach ($element in @('avdec_h264', 'autovideosink', 'autoaudiosink')) {
+            & "$runtime\gst-inspect-1.0.exe" $element | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "GStreamer plugin unavailable: $element" }
+          }
+
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: UxPlay-Windows-Portable-x64
+          path: dist/UxPlay-Portable.zip
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
