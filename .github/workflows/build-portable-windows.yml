@@ -132,12 +132,19 @@ jobs:
         shell: pwsh
         run: |
           $runtime = (Resolve-Path dist/UxPlay-Portable/runtime).Path
-          $env:PATH = "$runtime;$env:PATH"
+          # Test without MSYS2 installed on PATH: verify the ZIP is truly portable.
+          $env:PATH = "$runtime;$env:SystemRoot\System32;$env:SystemRoot"
           $env:GST_PLUGIN_PATH_1_0 = "$runtime\plugins"
           $env:GST_PLUGIN_SYSTEM_PATH_1_0 = "$runtime\plugins"
           $env:GST_PLUGIN_SCANNER = "$runtime\gst-plugin-scanner.exe"
           $env:GST_PLUGIN_SCANNER_1_0 = "$runtime\gst-plugin-scanner.exe"
-          foreach ($element in @('avdec_h264', 'autovideosink', 'autoaudiosink')) {
+          $env:GST_REGISTRY_1_0 = (Join-Path $PWD 'dist/portable-gst-registry-test.bin')
+          foreach ($element in @('appsrc', 'queue', 'typefind', 'decodebin',
+                                  'h264parse', 'avdec_h264', 'avdec_aac', 'avdec_alac',
+                                  'videoconvert', 'videoscale', 'autovideosink',
+                                  'audioconvert', 'audioresample', 'volume', 'level',
+                                  'autoaudiosink', 'jpegdec', 'imagefreeze',
+                                  'textoverlay', 'videoflip')) {
             & "$runtime\gst-inspect-1.0.exe" $element | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "GStreamer plugin unavailable: $element" }
           }
@@ -146,6 +153,9 @@ jobs:
         shell: pwsh
         run: |
           $exe = (Resolve-Path dist/UxPlay-Portable/UxPlay.exe).Path
+          $runtime = (Resolve-Path dist/UxPlay-Portable/runtime).Path
+          $env:PATH = "$runtime;$env:SystemRoot\System32;$env:SystemRoot"
+          $env:GST_REGISTRY_1_0 = (Join-Path $PWD 'dist/portable-uxplay-registry-test.bin')
           $out = Join-Path $PWD 'dist/smoke-out.txt'
           $err = Join-Path $PWD 'dist/smoke-err.txt'
           # A name option avoids the interactive double-click error hold.
