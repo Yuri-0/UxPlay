@@ -103,6 +103,27 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "GStreamer plugin unavailable: $element" }
           }
 
+      - name: Check default listener stays alive (Windows smoke test)
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path dist/UxPlay-Portable/UxPlay.exe).Path
+          $out = Join-Path $PWD 'dist/smoke-out.txt'
+          $err = Join-Path $PWD 'dist/smoke-err.txt'
+          # A name option avoids the interactive double-click error hold.
+          $proc = Start-Process -FilePath $exe -ArgumentList @('-n', 'UxPlay-CI-Smoke') -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          try {
+            Start-Sleep -Seconds 8
+            $proc.Refresh()
+            if ($proc.HasExited) {
+              Get-Content $out -ErrorAction SilentlyContinue
+              Get-Content $err -ErrorAction SilentlyContinue
+              throw "UxPlay unexpectedly exited during startup, code: $($proc.ExitCode)"
+            }
+            Write-Host 'UxPlay is still running after startup.'
+          } finally {
+            & taskkill /T /F /PID $proc.Id 2>&1 | Out-Null
+          }
+
       - name: Upload portable ZIP
         uses: actions/upload-artifact@v4
         with:
