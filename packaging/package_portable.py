@@ -36,7 +36,7 @@ def imports_of(binary: Path) -> set[str]:
 
 
 def copy_and_zip(original: Path, launcher: Path, source: Path,
-                 prefix: Path, output: Path):
+                 prefix: Path, output: Path, beacon_dir: Path):
     bin_dir = prefix / 'bin'
     plugin_dir = prefix / 'lib' / 'gstreamer-1.0'
     gio_dir = prefix / 'lib' / 'gio' / 'modules'
@@ -52,6 +52,10 @@ def copy_and_zip(original: Path, launcher: Path, source: Path,
             raise FileNotFoundError(f'Missing: {path}')
     if scanner is None:
         raise FileNotFoundError('Missing gst-plugin-scanner.exe in MSYS2 UCRT64')
+    if not (beacon_dir / 'UxPlayBLEBeacon.exe').is_file():
+        raise FileNotFoundError(f'Missing bundled Windows BLE beacon: {beacon_dir}')
+    if not (beacon_dir / '_internal').is_dir():
+        raise FileNotFoundError(f'Missing bundled BLE Python/WinRT dependencies: {beacon_dir / "_internal"}')
 
     if output.exists():
         shutil.rmtree(output)
@@ -61,6 +65,7 @@ def copy_and_zip(original: Path, launcher: Path, source: Path,
     # The click-to-run wrapper remains separate from the unmodified upstream binary.
     shutil.copy2(launcher, output / 'UxPlay.exe')
     shutil.copy2(original, rt / 'uxplay.exe')
+    shutil.copytree(beacon_dir, output / 'ble')
     shutil.copy2(scanner, rt / 'gst-plugin-scanner.exe')
     inspect = bin_dir / 'gst-inspect-1.0.exe'
     if not inspect.is_file():
@@ -143,7 +148,7 @@ def copy_and_zip(original: Path, launcher: Path, source: Path,
         'Original upstream: https://github.com/FDH2/UxPlay\n'
         f'Exact upstream commit: {commit}\n'
         f'Source: https://github.com/FDH2/UxPlay/tree/{commit}\n'
-        'Target: Windows x64 / MSYS2 UCRT64 / internal mDNS\n'
+        'Target: Windows x64 / MSYS2 UCRT64 / internal mDNS + optional BLE beacon\n'
         'runtime/uxplay.exe is compiled from unchanged upstream code.\n',
         encoding='utf-8',
     )
@@ -152,14 +157,20 @@ def copy_and_zip(original: Path, launcher: Path, source: Path,
         'UxPlay Windows Portable (original FDH2/UxPlay)\n'
         '\n'
         '1. Extract the whole ZIP, including the runtime subfolder.\n'
-        '2. Double-click UxPlay.exe to run the AirPlay receiver.\n'
+        '2. Double-click UxPlay.exe to run the receiver (LAN/mDNS + BLE).\n'
+        '   If a Bluetooth LE advertising adapter is available and enabled,\n'
+        '   the separate BLE helper automatically starts alongside UxPlay.\n'
+        '   The helper is optional: mDNS continues to work without Bluetooth.\n'
         '3. If Windows Firewall asks, allow runtime/uxplay.exe on PRIVATE networks.\n'
         '4. Put iPhone/iPad and Windows PC on the same local network.\n'
         '5. On iOS: Control Center > Screen Mirroring > select the PC.\n'
         '6. To stop the receiver, close the console window or press Ctrl+C.\n'
         '\n'
         'No BAT file, terminal, command arguments, or MSYS2 installation needed.\n'
-        'The runtime/ DLLs and GStreamer plugins MUST remain alongside UxPlay.exe.\n'
+        'Keep both runtime/ and ble/ directories alongside UxPlay.exe.\n'
+        'BLE advertising status or errors are written to UxPlay-BLE.log.\n'
+        'Bluetooth is for discovery only; video/audio streams over Wi-Fi/LAN.\n'
+        'A repeater that blocks unicast IP access still prevents mirroring.\n'
         'See BUILD-INFO.txt to verify the upstream commit used.\n'
         '\n'
         'Troubleshooting: Check firewall, network set to Private, same LAN,\n'
@@ -187,6 +198,7 @@ def main():
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--prefix', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--beacon-dir', type=Path, required=True)
     args = parser.parse_args()
     copy_and_zip(
         args.original.resolve(),
@@ -194,6 +206,7 @@ def main():
         args.source.resolve(),
         args.prefix.resolve(),
         args.output.resolve(),
+        args.beacon_dir.resolve(),
     )
 
 

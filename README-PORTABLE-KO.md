@@ -63,3 +63,26 @@ Actions는 원본 UxPlay 컴파일, 실행기 실행 및 도움말 테스트, GS
 - \`Initialized server socket(s)\` 메시지가 이어지고 프로그램이 계속 실행된다면 기본 네트워크 수신 대기에는 진입한 상태입니다.
 
 현재 런처는 **오류를 숨기지 않고 표시·기록하는 진단 기능**이며, 기기별 충돌이나 네트워크 충돌을 무조건 자동으로 수정하는 기능은 아닙니다.
+
+## LAN/mDNS + Bluetooth LE 동시 검색 (자동)
+
+- 새 포터블 패키지는 **mDNS와 BLE AirPlay 기기 검색을 함께** 제공합니다.
+- 압축 해제 후 **UxPlay.exe를 더블클릭**하면 UxPlay가 기본 내부 mDNS를 시작하고, 별도 Windows BLE 비콘도 자동 시작합니다. BAT, Python, 패키지 또는 명령줄을 사용자가 따로 설치할 필요는 없습니다.
+- BLE 비콘은 **컴퓨터에 Bluetooth LE 광고(advertising)를 지원하는 동글이 있을 때만** 작동합니다. Bluetooth 장치가 켜져 있고 아이폰의 Bluetooth도 켜져 있어야 합니다. 일부 오래된 동글은 BLE 수신만 가능하고 광고가 불가능할 수 있습니다.
+- **UxPlay-BLE.log**를 열어 "AirPlay Service_Discovery Advertisement" 및 "Publisher status change" 메시지로 광고 시작 여부를 확인합니다. "Publisher was aborted" 등 오류가 나더라도 **mDNS는 계속 동작합니다**.
+- **UxPlay-last-run.log**는 UxPlay 실행 로그입니다. **UxPlay-beacon.dat**은 UxPlay가 자동 생성/삭제하는 임시 비콘 정보입니다.
+- Windows 방화벽에 runtime/uxplay.exe의 **개인 네트워크** 접근을 허용해야 할 수 있습니다. BLE로 방화벽을 우회할 수는 없습니다.
+- BLE는 **미러링 대상 장치의 IP/포트를 알리는 검색 수단**입니다. 실제 화면·소리는 iPhone의 Wi-Fi와 PC의 LAN을 통해 전송합니다. 중계기의 NAT/격리 규칙이 휴대폰→PC IP 연결을 차단한다면 블루투스로 기기 검색이 되어도 미러링에 연결할 수 없습니다.
+- PC가 VPN이나 가상 어댑터 등 여러 네트워크에 연결됐다면 BLE 비콘이 잘못된 IPv4 주소를 알릴 수 있습니다. 현재 기본 경로의 PC IPv4 주소를 사용합니다.
+- 기본 더블클릭 모드에서는 두 검색 방식을 켜고, -h 같은 명령줄 옵션을 직접 전달하면 원본 UxPlay 명령줄 동작을 유지합니다. 명령줄 모드에서는 비콘을 자동 시작하지 않습니다.
+
+### 친구 PC 테스트
+
+1. Windows Bluetooth 켜기, PC의 Bluetooth 동글 연결
+2. 패키지 압축 해제 및 UxPlay.exe 더블클릭
+3. iPhone Bluetooth와 Wi-Fi 켜기
+4. iPhone을 PC 근처에 두고 제어 센터 → 화면 미러링 확인
+5. 안 보이면 UxPlay-BLE.log의 오류 메시지 확인
+6. 보이지만 연결되지 않는다면 IP 네트워크 도달성/방화벽 문제 확인
+
+**CI의 한계:** GitHub Actions는 BLE 비콘 실행 파일의 Python/WinRT 모듈 로딩과 UxPlay 서버 시작 여부를 검사할 수 있지만, 실제 블루투스 동글과 iPhone이 없으므로 BLE 광고와 미러링 연결까지는 검증하지 못합니다.

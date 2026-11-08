@@ -64,7 +64,7 @@ jobs:
       - name: Build self-contained launcher (no BAT or manual commands)
         run: |
           set -eux
-          gcc -O2 -Wall -Wextra -municode -o build/portable-launcher.exe packaging/launcher.c
+          gcc -O2 -Wall -Wextra -municode -o build/portable-launcher.exe packaging/launcher.c -lws2_32
           test -f build/portable-launcher.exe
 
       - name: Setup Python for portable packaging
@@ -72,15 +72,46 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install PE DLL dependency inspector
+      - name: Install Windows BLE beacon freezer and WinRT libraries
         shell: pwsh
-        run: python -m pip install pefile==2024.8.26
+        run: |
+          python -m pip install pefile==2024.8.26 pyinstaller==6.16.0 psutil "winrt-Windows.Foundation" "winrt-Windows.Foundation.Collections" "winrt-Windows.Devices.Bluetooth.Advertisement" "winrt-Windows.Storage.Streams"
+
+      - name: Freeze original BLE beacon as an independent Windows executable
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --onedir --name UxPlayBLEBeacon --distpath build/ble-dist --workpath build/ble-work --specpath build/ble-work --paths upstream/Bluetooth_LE_beacon --hidden-import uxplay_beacon_module_winrt --hidden-import winrt.windows.foundation.collections --hidden-import winrt.windows.devices.bluetooth.advertisement --hidden-import winrt.windows.storage.streams --collect-submodules winrt upstream/Bluetooth_LE_beacon/uxplay-beacon.py
+          if (!(Test-Path build/ble-dist/UxPlayBLEBeacon/UxPlayBLEBeacon.exe)) { throw "BLE beacon binary missing" }
+
+      - name: Test bundled Windows BLE module without a physical adapter
+        shell: pwsh
+        run: |
+          $ble = (Resolve-Path build/ble-dist/UxPlayBLEBeacon/UxPlayBLEBeacon.exe).Path
+          $out = Join-Path $PWD 'build/ble-test-out.txt'
+          $err = Join-Path $PWD 'build/ble-test-err.txt'
+          $env:PYTHONUNBUFFERED = '1'
+          $missing = Join-Path $PWD 'build/nonexistent-beacon-file.bin'
+          $proc = Start-Process -FilePath $ble -ArgumentList @('--path', "$missing", '--ipv4', '192.0.2.10') -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          try {
+            Start-Sleep -Seconds 6
+            $proc.Refresh()
+            $stdout = Get-Content $out -Raw -ErrorAction SilentlyContinue
+            $stderr = Get-Content $err -Raw -ErrorAction SilentlyContinue
+            if ($proc.HasExited -or $stdout -notmatch 'loaded uxplay_beacon_module_winrt') {
+              Write-Host $stdout
+              Write-Host $stderr
+              throw 'Portable BLE helper could not import the upstream WinRT beacon implementation'
+            }
+            Write-Host 'BLE helper loaded successfully without requiring Bluetooth hardware on CI.'
+          } finally {
+            if (!$proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          }
 
       - name: Package original binary, GStreamer and dependency DLLs
         shell: pwsh
         run: |
           $prefix = Join-Path "${{ steps.msys2.outputs.msys2-location }}" "ucrt64"
-          python packaging/package_portable.py --original build/uxplay.exe --launcher build/portable-launcher.exe --source upstream --prefix "$prefix" --output dist/UxPlay-Portable
+          python packaging/package_portable.py --original build/uxplay.exe --launcher build/portable-launcher.exe --source upstream --prefix "$prefix" --output dist/UxPlay-Portable --beacon-dir build/ble-dist/UxPlayBLEBeacon
 
       - name: Smoke test native EXE through launcher
         shell: pwsh
